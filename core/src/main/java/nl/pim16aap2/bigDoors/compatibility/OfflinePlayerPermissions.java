@@ -52,6 +52,28 @@ final class OfflinePlayerPermissions
 
     static Player wrap(Player fakePlayer, Scope scope)
     {
+        final Player shell = CraftPlayerPermissionShell.tryCreate(fakePlayer, scope);
+        if (shell != null)
+            return shell;
+        return newProxy(fakePlayer, scope);
+    }
+
+    /** LuckPerms answer for one node, or the Bukkit default when LuckPerms has no value. */
+    static Object permissionAnswer(Scope scope, Player fakePlayer, String name, Object argument)
+    {
+        final String node = argument instanceof Permission ? ((Permission) argument).getName() : (String) argument;
+        final Boolean value = scope.permissions.apply(node);
+        if (name.equals("isPermissionSet"))
+            return value != null;
+        if (value != null)
+            return value;
+        final Permission permission = argument instanceof Permission ? (Permission) argument :
+            Bukkit.getPluginManager().getPermission(node);
+        return permission != null && permission.getDefault().getValue(fakePlayer.isOp());
+    }
+
+    private static Player newProxy(Player fakePlayer, Scope scope)
+    {
         return (Player) Proxy.newProxyInstance(IFakePlayer.class.getClassLoader(),
             new Class<?>[]{Player.class, IFakePlayer.class, AutoCloseable.class}, (proxy, method, args) ->
             {
@@ -62,17 +84,7 @@ final class OfflinePlayerPermissions
                     return null;
                 }
                 if ((name.equals("hasPermission") || name.equals("isPermissionSet")) && args.length == 1)
-                {
-                    final String node = args[0] instanceof Permission ? ((Permission) args[0]).getName() : (String) args[0];
-                    final Boolean value = scope.permissions.apply(node);
-                    if (name.equals("isPermissionSet"))
-                        return value != null;
-                    if (value != null)
-                        return value;
-                    final Permission permission = args[0] instanceof Permission ? (Permission) args[0] :
-                        Bukkit.getPluginManager().getPermission(node);
-                    return permission != null && permission.getDefault().getValue(fakePlayer.isOp());
-                }
+                    return permissionAnswer(scope, fakePlayer, name, args[0]);
                 if (name.equals("getPlayer") && method.getParameterCount() == 0)
                     return proxy;
                 if (name.equals("equals") && args.length == 1)

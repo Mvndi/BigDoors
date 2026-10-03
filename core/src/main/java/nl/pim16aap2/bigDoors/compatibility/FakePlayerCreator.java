@@ -26,6 +26,8 @@ public class FakePlayerCreator
     {
         this.plugin = plugin;
         fakePlayerInstantiator = createFakePlayerInstantiator(plugin);
+        if (fakePlayerInstantiator != null)
+            CraftPlayerPermissionShell.prepare();
     }
 
     @Nullable Player getFakePlayer(OfflinePlayer oPlayer, Location location)
