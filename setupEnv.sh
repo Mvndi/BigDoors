@@ -1,81 +1,96 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# Update these if needed!
-J_8="/usr/lib/jvm/java-8-openjdk/bin/java"
-J_17="/usr/lib/jvm/java-17-openjdk/bin/java"
-J_21="/usr/lib/jvm/java-21-openjdk/bin/java"
-BUILD_DIR="nms_build"
+# The CI version list is also the source of truth for local builds.
+# Override a JDK executable with J_8/J_16/J_17/J_21/J_25, or set JAVA<n>_HOME.
+BUILD_DIR="${BUILD_DIR:-nms_build}"
+MAVEN_REPO="$HOME/.m2/repository"
+force=false
+if [[ "${1:-}" == --force ]]; then force=true; shift; fi
+requested=("$@")
+versions=()
+java_versions=()
+major=""
+while IFS= read -r line; do
+    if [[ "$line" =~ ^java([0-9]+): ]]; then
+        major="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\"([^\"]+)\" ]]; then
+        versions+=("${BASH_REMATCH[1]}")
+        java_versions+=("$major")
+    fi
+done < .github/nms-groups.yml
 
-VERSIONS=(     1.11.2 1.12.2 1.13   1.13.1 1.13.2 1.14.4 1.15.2 1.16.1 1.16.2 1.16.3 1.16.5 1.17.1  1.18.1  1.18.2  1.19    1.19.1  1.19.3  1.19.4  1.20.1  1.20.2  1.20.4  1.20.6  1.21)
-JAVA_VERSIONS=("$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_8" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_17" "$J_21" "$J_21")
-
-
-function setup_version_dir() {
-    version="$1"
-    dir="$2"
-    java_path="$3"
-    build_tools="$4"
-
-    [[ -d "$dir" ]] || mkdir "$dir"
-    echo "\"$java_path\" -jar \"$build_tools\" --rev \"$version\" --generate-docs --generate-source" > "$dir/run.sh"
-}
-
-function build_version() {
-    version="$1"
-    java_path="$2"
-    build_tools="$3"
-
-    dir="$BUILD_DIR/Spigot$version"
-
-    setup_version_dir "$version" "$dir" "$java_path" "$build_tools"
-
-    (cd "$dir" && bash "run.sh" &>/dev/null)
-    result="$?"
-
-    test "$result" -eq 0 && echo "Finished building $version" || echo "Failed building version $version"
-}
-
-function set_thread_count() {
-    num_threads=$(grep -c ^processor /proc/cpuinfo)
-
-    # Each build process will take up to 5GB, so that might be more limiting than number of cores
-    # We definitely do _not_ want to swap!
-    free_ram=$(awk '/MemFree/ { printf "%d \n", $2/1024/1024 }' /proc/meminfo)
-    ram_limit=$((free_ram / 5))
-    num_threads=$((num_threads < ram_limit ? num_threads : ram_limit))
-    num_threads=$((num_threads < 1 ? 1 : num_threads))
-}
-
-
-
-[[ -f "$J_8" ]] || { echo "Could not find a Java 8 install at '$J_8'! Please update the path!"; exit 1;}
-[[ -f "$J_17" ]] || { echo "Could not find a Java 17 install at '$J_17'! Please update the path!"; exit 1;}
-
-[[ -d "$BUILD_DIR" ]] || mkdir -p "$BUILD_DIR"
-
-
-export -f build_version
-export -f setup_version_dir
-export BUILD_DIR="$BUILD_DIR"
-
-
-echo "Downloading BuildTools..."
-wget https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar -qO "$BUILD_DIR/BuildTools.jar" >/dev/null
-build_tools=$(readlink -f "$BUILD_DIR/BuildTools.jar")
-printf "Done!\n\n"
-
-set_thread_count
-printf "Thread_count: %d\n\n" "$num_threads"
-
-
-for i in "${!VERSIONS[@]}"; do
-    version="${VERSIONS[i]}"
-    java_path="${JAVA_VERSIONS[i]}"
-    echo "Building: $version"
-    sem -j $num_threads "build_version $version \"$java_path\" \"$build_tools\""
+for requested_version in "${requested[@]}"; do
+    found=false
+    for version in "${versions[@]}"; do
+        if [[ "$version" == "$requested_version" ]]; then found=true; break; fi
+    done
+    if ! $found; then echo "Unknown NMS version: $requested_version" >&2; exit 1; fi
 done
-sem --wait
 
-./installDependencies.sh
+find_java() {
+    local major="$1" override="J_$1" env_home="JAVA${1}_HOME" candidate actual
+    if [[ -n "${!override:-}" ]]; then
+        printf '%s\n' "${!override}"
+        return
+    fi
+    if [[ -n "${!env_home:-}" ]]; then
+        printf '%s/bin/java\n' "${!env_home}"
+        return
+    fi
+    for candidate in "/usr/lib/jvm/java-$major-openjdk/bin/java" \
+        "$HOME"/.jdks/*/bin/java "${JAVA_HOME:-/nonexistent}/bin/java"; do
+        [[ -x "$candidate" ]] || continue
+        actual=$("$candidate" -XshowSettings:properties -version 2>&1 | \
+            awk '/java.specification.version =/ {print $3}')
+        if [[ "$actual" == "$major" || "$actual" == "1.$major" ]]; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+    echo "Java $major not found. Set $override or $env_home to its JDK." >&2
+    return 1
+}
 
-echo "The environment has been set up! Feel free to remove the $BUILD_DIR directory now!"
+mkdir -p "$BUILD_DIR"
+build_tools="$(realpath "$BUILD_DIR")/BuildTools.jar"
+downloaded=false
+for i in "${!versions[@]}"; do
+    version="${versions[i]}"
+    if (( ${#requested[@]} )); then
+        selected=false
+        for requested_version in "${requested[@]}"; do
+            if [[ "$version" == "$requested_version" ]]; then selected=true; break; fi
+        done
+        $selected || continue
+    fi
+    cached="$MAVEN_REPO/org/spigotmc/spigot/$version-R0.1-SNAPSHOT"
+    if ! $force && [[ -f "$cached/spigot-$version-R0.1-SNAPSHOT.jar" ]]; then
+        echo "Using cached Spigot $version"
+        continue
+    fi
+    java_path="$(find_java "${java_versions[i]}")"
+    if ! $downloaded; then
+        curl --fail --location --retry 2 \
+            https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar \
+            --output "$build_tools"
+        downloaded=true
+    fi
+    dir="$(realpath "$BUILD_DIR")/Spigot$version"
+    mkdir -p "$dir"
+    echo "Building Spigot $version with $java_path (log: $dir/build.log)"
+    # Build sequentially to bound memory use. A failed version stops setup and preserves its log.
+    if ! (cd "$dir" && JAVA_HOME="$(dirname "$(dirname "$java_path")")" \
+        "$java_path" -Xmx2G -jar "$build_tools" --rev "$version" --compile SPIGOT \
+        > build.log 2>&1); then
+        tail -n 60 "$dir/build.log" >&2
+        exit 1
+    fi
+    echo "Finished building Spigot $version"
+done
+
+if [[ ! -f "$MAVEN_REPO/com/dansplugins/medieval-factions/5.2.0/medieval-factions-5.2.0.jar" ]]; then
+    bash ./installDependencies.sh
+fi
+echo "NMS dependencies ready. Run mvn package with Java 25 installed (auto-discovered by Maven)."

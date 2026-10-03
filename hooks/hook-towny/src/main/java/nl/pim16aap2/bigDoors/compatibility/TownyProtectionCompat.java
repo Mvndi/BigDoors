@@ -1,6 +1,8 @@
 package nl.pim16aap2.bigDoors.compatibility;
 
 import com.palmergames.bukkit.towny.TownyAPI;
+import com.palmergames.bukkit.towny.Towny;
+import org.bukkit.Bukkit;
 import com.palmergames.bukkit.towny.object.TownyPermission.ActionType;
 import com.palmergames.bukkit.towny.utils.PlayerCacheUtil;
 import org.bukkit.Location;
@@ -27,9 +29,21 @@ public class TownyProtectionCompat implements IProtectionCompat
     @Override
     public boolean canBreakBlock(final Player player, final Location loc)
     {
-        return PlayerCacheUtil.getCachePermission(player, loc,
-                                                  loc.getBlock().getType(),
-                                                  ActionType.DESTROY);
+        final boolean offline = Bukkit.getPlayer(player.getUniqueId()) == null;
+        if (offline) Towny.getPlugin().deleteCache(player);
+        try
+        {
+            return canBreakBlockWithCache(player, loc);
+        }
+        finally
+        {
+            if (offline) Towny.getPlugin().deleteCache(player);
+        }
+    }
+
+    private boolean canBreakBlockWithCache(final Player player, final Location location)
+    {
+        return PlayerCacheUtil.getCachePermission(player, location, location.getBlock().getType(), ActionType.DESTROY);
     }
 
     @Override
@@ -42,12 +56,23 @@ public class TownyProtectionCompat implements IProtectionCompat
         int y2 = Math.max(loc1.getBlockY(), loc2.getBlockY());
         int z2 = Math.max(loc1.getBlockZ(), loc2.getBlockZ());
 
-        for (int xPos = x1; xPos <= x2; ++xPos)
-            for (int yPos = y1; yPos <= y2; ++yPos)
-                for (int zPos = z1; zPos <= z2; ++zPos)
-                    if (!canBreakBlock(player, new Location(loc1.getWorld(), xPos, yPos, zPos)))
-                        return false;
-        return true;
+        final boolean offline = Bukkit.getPlayer(player.getUniqueId()) == null;
+        // An online owner's cached overrides must not authorize a later fake-player check, or vice versa.
+        // Reset once per cuboid, retaining Towny's per-material/townblock cache within this check.
+        if (offline) Towny.getPlugin().deleteCache(player);
+        try
+        {
+            for (int xPos = x1; xPos <= x2; ++xPos)
+                for (int yPos = y1; yPos <= y2; ++yPos)
+                    for (int zPos = z1; zPos <= z2; ++zPos)
+                        if (!canBreakBlockWithCache(player, new Location(loc1.getWorld(), xPos, yPos, zPos)))
+                            return false;
+            return true;
+        }
+        finally
+        {
+            if (offline) Towny.getPlugin().deleteCache(player);
+        }
     }
 
     @Override

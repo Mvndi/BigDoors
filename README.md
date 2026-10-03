@@ -414,3 +414,23 @@ dependencies {
 ## Thanks
 
 As a final note, I'd like to thank [Captain_Chaos](https://dev.bukkit.org/members/captain_chaos) for making his [PorteCoulissante](https://dev.bukkit.org/projects/portecoulissante) plugin. I've used it a lot and it inspired me to make this plugin!
+
+## Building locally
+
+Install Maven and the JDKs required by `.github/nms-groups.yml`. Java 25 is required
+for the 26.x NMS adapters. Maven discovers installed JDKs automatically (including
+`~/.jdks`); for an installation elsewhere, set `JAVA25_HOME` to its JDK directory.
+Maven itself can still run on Java 21.
+
+```sh
+bash setupEnv.sh
+mvn package
+```
+
+Setup reads the same NMS version list as CI, skips Spigot dependencies already in
+`~/.m2/repository`, and builds missing versions sequentially. Build logs are kept
+in `nms_build/Spigot<version>/build.log`; failures stop setup. To prepare only
+selected versions, use `bash setupEnv.sh 26.1.2 26.2 26.3`. Use `--force` as the
+first argument to rebuild cached versions. JDK executables can be overridden with
+`J_8`, `J_16`, `J_17`, `J_21`, and `J_25`, or the corresponding `JAVA<n>_HOME`.
+The packaged plugin is `core/target/BigDoors.jar`.

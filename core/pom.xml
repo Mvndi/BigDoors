@@ -17,6 +17,21 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.github.TownyAdvanced</groupId>
+            <artifactId>towny</artifactId>
+            <version>0.97.5.0</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Optional at runtime; load offline permission data without blocking the server thread. -->
+        <dependency>
+            <groupId>net.luckperms</groupId>
+            <artifactId>api</artifactId>
+            <version>5.4</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
             <version>1.11.2-R0.1-SNAPSHOT</version>

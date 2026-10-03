@@ -5,8 +5,9 @@ import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 import java.util.function.BiFunction;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 
 /**
@@ -18,16 +19,27 @@ public class FakePlayerCreator
 {
     public static final String FAKE_PLAYER_METADATA = "isBigDoorsFakePlayer";
 
+    private final BigDoors plugin;
     private final @Nullable BiFunction<OfflinePlayer, Location, Player> fakePlayerInstantiator;
 
     public FakePlayerCreator(final BigDoors plugin)
     {
+        this.plugin = plugin;
         fakePlayerInstantiator = createFakePlayerInstantiator(plugin);
     }
 
     @Nullable Player getFakePlayer(OfflinePlayer oPlayer, Location location)
     {
         return fakePlayerInstantiator == null ? null : fakePlayerInstantiator.apply(oPlayer, location);
+    }
+
+    CompletableFuture<@Nullable Player> getFakePlayerAsync(OfflinePlayer player, Location location)
+    {
+        final Player fakePlayer = getFakePlayer(player, location);
+        if (fakePlayer == null)
+            return CompletableFuture.completedFuture(null);
+        return OfflinePlayerPermissions.prepare(plugin, player, location)
+            .thenApply(permissions -> OfflinePlayerPermissions.wrap(fakePlayer, permissions));
     }
 
     private @Nullable BiFunction<OfflinePlayer, Location, Player> createFakePlayerInstantiator(BigDoors plugin)

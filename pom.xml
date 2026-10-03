@@ -94,6 +94,21 @@
 
     <build>
         <plugins>
+            <!-- NMS 26.x dependencies require Java 25; discover it even when Maven runs on Java 21. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-toolchains-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <goals><goal>select-jdk-toolchain</goal></goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <version>[25,27)</version>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-clean-plugin</artifactId>

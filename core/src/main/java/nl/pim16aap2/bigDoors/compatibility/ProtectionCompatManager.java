@@ -80,7 +80,7 @@ public class ProtectionCompatManager implements Listener
             return CompletableFuture.completedFuture(true);
 
         // Real players do not have the FAKE_PLAYER tag, so we can use the real permissions check for them.
-        if (!player.hasMetadata(FakePlayerCreator.FAKE_PLAYER_METADATA))
+        if (!(player instanceof IFakePlayer) && !player.hasMetadata(FakePlayerCreator.FAKE_PLAYER_METADATA))
             return CompletableFuture.completedFuture(player.hasPermission(BYPASS_PERMISSION));
 
         // offline players don't have permissions, so use Vault to read those.
@@ -99,13 +99,13 @@ public class ProtectionCompatManager implements Listener
      *
      * @see FakePlayerCreator
      */
-    private @Nullable Player getPlayer(UUID playerUUID, Location location)
+    private CompletableFuture<@Nullable Player> getPlayer(UUID playerUUID, Location location)
     {
         final Player player = Bukkit.getPlayer(playerUUID);
         if (player != null)
-            return player;
+            return CompletableFuture.completedFuture(player);
 
-        return fakePlayerCreator.getFakePlayer(Bukkit.getOfflinePlayer(playerUUID), location);
+        return fakePlayerCreator.getFakePlayerAsync(Bukkit.getOfflinePlayer(playerUUID), location);
     }
 
     // Needs to be called from the main thread!
@@ -237,11 +237,20 @@ public class ProtectionCompatManager implements Listener
         if (protectionCompats.isEmpty())
             return CompletableFuture.completedFuture(null);
 
-        final @Nullable Player fakePlayer = getPlayer(playerUUID, regionLocation);
-        if (fakePlayer == null)
-            return CompletableFuture.completedFuture("InvalidFakePlayer");
-
-        return checkForPlayer(regionLocation, fakePlayer, () -> function.apply(fakePlayer));
+        return getPlayer(playerUUID, regionLocation).thenCompose(fakePlayer ->
+        {
+            if (fakePlayer == null)
+                return CompletableFuture.completedFuture("InvalidFakePlayer");
+            return checkForPlayer(regionLocation, fakePlayer, () -> function.apply(fakePlayer))
+                .whenComplete((result, failure) ->
+                {
+                    if (fakePlayer instanceof IFakePlayer && fakePlayer instanceof AutoCloseable)
+                    {
+                        try { ((AutoCloseable) fakePlayer).close(); }
+                        catch (Exception exception) { plugin.getMyLogger().log("Failed to release offline permissions", exception); }
+                    }
+                });
+        });
     }
 
     /**
