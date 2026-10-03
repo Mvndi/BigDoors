@@ -93,6 +93,12 @@ final class CraftPlayerPermissionShell
         if (args == null)
             args = NO_ARGS;
         final String name = method.getName();
+        // Permission plugins can retain this shell as a cache key after close() releases its delegate.
+        // Keep identity stable for the entire object lifetime, including before registration and after cleanup.
+        if (name.equals("equals") && args.length == 1)
+            return self == args[0];
+        if (name.equals("hashCode") && method.getParameterCount() == 0)
+            return System.identityHashCode(self);
         final Player delegate;
         final OfflinePlayerPermissions.Scope scope;
         final boolean close = name.equals("close") && method.getParameterCount() == 0;
@@ -119,10 +125,6 @@ final class CraftPlayerPermissionShell
             return defaultValue(method.getReturnType());
         if (name.equals("getPlayer") && method.getParameterCount() == 0)
             return self;
-        if (name.equals("equals") && args.length == 1)
-            return self == args[0];
-        if (name.equals("hashCode") && method.getParameterCount() == 0)
-            return System.identityHashCode(self);
         if ((name.equals("hasPermission") || name.equals("isPermissionSet")) && args.length == 1 && scope != null)
             return OfflinePlayerPermissions.permissionAnswer(scope, delegate, name, args[0]);
         if (method.getParameterCount() == 0 && (name.equals("locale") || name.equals("getLocale")))
